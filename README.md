@@ -1,73 +1,105 @@
-# 📈 DataQuest: Real-Time Financial RAG Dashboard
+# 📈 DataQuest: Real-Time Financial RAG
 
-DataQuest is a real-time Retrieval-Augmented Generation (RAG) application designed for financial analysts. It continuously monitors live stock market data and news feeds, enabling users to ask questions and receive up-to-the-second answers based on the absolute latest information.
-
-Powered by **Pathway** for reactive data processing, **Groq (Llama 3)** for ultra-fast inference, and **Streamlit** for a responsive user interface.
+DataQuest is a **real-time Retrieval-Augmented Generation (RAG)** engine built for financial analysis. It doesn't just "search" a static database—it listens to live stock markets, processes news streams, and reads uploaded documents instantly to provide up-to-the-second answers using **LLMs**.
 
 ---
 
-## 🏗️ Architecture
+## 🛠️ Tech Stack
 
-The application caches no stale data; it processes streams reactively.
+This project leverages a high-performance stack designed for speed and real-time processing:
 
-### 1. The Input Layer (Real-Time Ingestion)
-*   **Live Data Stream (`app.py`):** Fetches real-time stock quotes (Alpha Vantage) and news articles (NewsAPI) every 60 seconds.
-*   **File Injection:** Monitors `live_data/` for manually dropped PDF reports or text files.
-*   **User Questions:** Reads incoming questions from the Dashboard via `questions.csv`.
-
-### 2. The Processing Core (Pathway RAG)
-*   **Vector Search & Context:** Pathway indexes incoming data streams on-the-fly.
-*   **LLM Inference:** Relevant context is sent to **Groq (Llama 3.3-70b)** to generate an answer.
-*   **Logging:** Raw results are written to an append-only log: `answers_log.csv`.
-
-### 3. The Data Sync Layer (Robust Persistence)
-*   **Background Syncer:** A dedicated thread in `app.py` tails `answers_log.csv`.
-*   **Cleaning & Upsert:** It uses robust Pandas parsing to handle complex text, filters invalid entries, and updates a **SQLite Database (`answers.db`)**.
-*   **Concurrency:** This decouples the high-speed RAG pipeline from the user-facing dashboard, preventing file locks and data corruption.
-
-### 4. The Presentation Layer (Streamlit)
-*   **Dashboard (`dashboard.py`):** Connects to `answers.db` via SQL.
-*   **Features:** Displays chat history, supports "Clear Chat" (truncates DB), and "Archive Chat" (dumps to CSV).
+*   **⚡ Pathway**: The core engine for reactive data processing. It handles data ingestion, vector indexing, and RAG logic in real-time streaming mode.
+*   **🧠 Groq (Llama 3)**: Ultra-low latency LLM inference. Used to generate human-like answers from the retrieved context.
+*   **📊 Streamlit**: The interactive frontend dashboard for chatting and visualizing data.
+*   **📈 Yahoo Finance & NewsAPI**: Live data sources for market quotes and global news.
+*   **💾 SQLite**: Lightweight, robust storage for reliable data handoff between the high-speed backend and the UI.
+*   **🐍 Python**: The primary language for all logic and integration.
 
 ---
 
-## 🚀 Setup & Run Instructions
+## 🔄 How It Works (The Process)
+
+The system operates in a continuous loop of **Ingestion**, **Processing**, and **Presentation**.
+
+### 1. Ingestion Layer (The "Ears") 📡
+The system continuously listens to three data sources:
+*   **Market Data**: `app.py` runs a thread that fetches live stock prices (Yahoo Finance) and global news (NewsAPI) every minute. This data is written to a stream buffer (`stream_data.jsonl`).
+*   **User Documents**: Any PDF or text file dropped into the `live_data/` folder (or uploaded via UI) is instantly detected, parsed, and injected into the stream.
+*   **User Queries**: Questions typed in the dashboard are saved to `QnA/questions.csv`, which Pathway monitors as a stream.
+
+### 2. Processing Core (The "Brain") 🧠
+**Pathway** sits in the middle, treating all inputs as infinite streams:
+1.  **Normalization**: It merges stock data, news, and uploaded files into a unified "Knowledge Stream".
+2.  **Context Retrieval**: When a question arrives, Pathway dynamically filters the knowledge stream for relevant keywords and prioritizes recent data (Time-Decay Scoring).
+3.  **LLM Inference**: The relevant context + the user's question are sent to **Groq**.
+4.  **Answer Generation**: The LLM responds, and the result is written to an append-only log (`answers_log.csv`).
+
+### 3. Sync & Presentation Layer (The "Face") 💻
+To ensure a smooth user experience, we decouple the heavy processing from the UI:
+*   **Sync Agent**: A dedicated thread watches `answers_log.csv` and safely updates a **SQLite Database** (`answers.db`). This prevents file locking issues or read errors.
+*   **Dashboard**: The Streamlit app polls the SQLite DB. When your specific question's answer appears in the DB, it's displayed instantly in the chat.
+*   **Live Ticker**: The dashboard also reads the processed news stream to show a running ticker of stock prices and breaking news on the sidebar.
+
+---
+
+## 🚀 Sequence of Events
+
+Here is the step-by-step flow when you ask a question:
+
+1.  **User** types: *"What's the latest on Apple?"* in the Dashboard.
+2.  **Streamlit** saves the question to `questions.csv`.
+3.  **Pathway** detects the new line in `questions.csv`.
+4.  **Pathway** scans its real-time index for "Apple" (combining News + Stock Prices + Uploaded Docs).
+5.  **Pathway** constructs a prompt with the top 5 most relevant pieces of information.
+6.  **Groq API** receives the prompt and generates an answer.
+7.  **Pathway** writes the answer to `answers_log.csv`.
+8.  **Sync Thread** moves the answer to `answers.db`.
+9.  **Streamlit** sees the answer in `answers.db` and updates the Chat UI.
+
+**⚡ Total Latency:** Typically < 2 seconds.
+
+---
+
+## 🏃 Setup & Run
 
 ### 1. Prerequisites
 *   Python 3.10+
-*   API Keys for: **Groq**, **Alpha Vantage**, and **NewsAPI**.
+*   API Keys:
+    *   **Groq API Key** (for LLM)
+    *   **Alpha Vantage** or **NewsAPI** (optional, for live data)
 
-### 2. Environment Setup
-1.  **Clone/Download** the repository.
-2.  **Install Dependencies:**
-    ```bash
-    pip install -r requirements.txt
-    ```
-3.  **Configure Environment Variables:**
-    Create a `.env` file in the root directory:
-    ```ini
-    GROQ_API_KEY=gsk_...
-    ALPHA_VANTAGE_KEY=...
-    NEWSAPI_KEY=...
-    ```
+### 2. Installation
+Clone the repo and install dependencies:
+```bash
+pip install -r requirements.txt
+```
 
-### 3. Running the Application
-You need to run the Backend (Pathway) and Frontend (Streamlit) in separate terminals.
+### 3. Configuration
+Create a `.env` file in the root directory:
+```ini
+GROQ_API_KEY=gsk_...
+ALPHA_VANTAGE_KEY=...
+NEWSAPI_KEY=...
+```
 
-**Terminal 1: Start the Backend (Pathway)**
-This runs the continuous data processing pipeline.
+### 4. Running the App
+
+**Terminal 1 (Backend):**
 ```bash
 python app.py
 ```
-*Wait until you see "Pathway is running..."*
 
-**Terminal 2: Start the Frontend (Dashboard)**
-This launches the web interface.
+**Terminal 2 (Frontend):**
 ```bash
 python -m streamlit run dashboard.py
 ```
 
-### 4. Usage
-*   Open the URL shown in Terminal 2 (usually `http://localhost:8501`).
-*   Type a question (e.g., *"What is the latest on AAPL?"*).
-*   The system will fetch the latest context and generate an answer.
+---
+
+## 📂 Project Structure
+
+*   `app.py`: The heart of the system. Runs Pathway streams, data fetchers, and the sync agent.
+*   `dashboard.py`: The user interface built with Streamlit.
+*   `entrypoint.sh`: Helper script to launch both services.
+*   `live_data/`: Drop files here to "teach" the AI new knowledge instantly.
+*   `QnA/`: Stores the conversation history and database.

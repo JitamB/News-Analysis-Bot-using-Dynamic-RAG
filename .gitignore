@@ -8,3 +8,5 @@ chats/
 # stream_data.jsonl
 # file_tracker.json
 *.log
+debug_sync.txt
+debug_api.key
