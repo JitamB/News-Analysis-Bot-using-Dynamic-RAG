@@ -150,18 +150,14 @@ def sync_snapshot_file():
                          time.sleep(1)
                          continue
                          
-                    # Use Python engine with backslash escaping (Pathway seems to use backslash for quotes)
-                    df = pd.read_csv(ANSWERS_LOG_FILE, engine='python', on_bad_lines='skip')
+                    # Use Python engine with backslash escaping (Pathway uses \" for internal quotes)
+                    df = pd.read_csv(ANSWERS_LOG_FILE, engine='python', on_bad_lines='skip', escapechar='\\', quotechar='"')
                 except Exception:
                     # File might be locked or writing
                     time.sleep(1)
                     continue
                 
                 if not df.empty and 'timestamp' in df.columns and 'question' in df.columns:
-                     # DEBUG LOGGING
-                     with open("debug_sync.txt", "a") as f:
-                         f.write(f"{datetime.datetime.now()} - Read {len(df)} rows. Columns: {list(df.columns)}\n")
-
                      # Filter for relevant columns
                      # We only care about the latest answer for each question
                      
@@ -172,8 +168,26 @@ def sync_snapshot_file():
                      
                      with sqlite3.connect(ANSWERS_DB) as conn:
                          cursor = conn.cursor()
+
+                         # Get latest timestamp in DB to avoid reprocessing
+                         cursor.execute("SELECT MAX(timestamp) FROM answers")
+                         last_ts = cursor.fetchone()[0]
+                         if not last_ts:
+                             last_ts = "0"
+                             
+                         # Filter new rows only
+                         # Ensure string comparison works (ISO format is sortable)
+                         # IMPORTANT: Use 'timestamp' column for comparison, not 'time' (which is int)
+                         # DB timestamp is ISO string.
+                         ts_column = 'timestamp' if 'timestamp' in df.columns else sort_col
                          
-                         for _, row in df_sorted.iterrows():
+                         new_rows = df_sorted[df_sorted[ts_column].astype(str) > last_ts]
+                         
+                         if new_rows.empty:
+                             time.sleep(1)
+                             continue
+
+                         for _, row in new_rows.iterrows():
                              # Extract fields
                              ts = str(row.get('timestamp', ''))
                              q = str(row.get('question', ''))
@@ -508,7 +522,7 @@ def run_pipeline():
         # Stop words for better keyword extraction
         stop_words = {'the', 'is', 'are', 'was', 'were', 'a', 'an', 'and', 'or', 'but', 
                      'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'from', 
-                     'what', 'who', 'when', 'where', 'why', 'how', 'this', 'that'}
+                     'what', 'who', 'when', 'where', 'why', 'how', 'this', 'that', 'do', 'know', 'you'}
         
         # Extract keywords from query
         # Replace punctuation with spaces to handle "Jitam's" -> "Jitam s"
@@ -623,7 +637,7 @@ def run_pipeline():
                         {"role": "user", "content": f"Context:\n{context}\n\nQuestion: {query}"}
                     ],
                     temperature=0.7,
-                    max_tokens=2048
+                    max_tokens=1024
                 )
                 answer = response.choices[0].message.content
                 # Update Cache

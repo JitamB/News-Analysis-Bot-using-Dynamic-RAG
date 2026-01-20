@@ -44,17 +44,16 @@ def load_csv_data(file_path):
             return pd.DataFrame()
     return pd.DataFrame()
 
-def load_live_answers(question_text=None):
+def load_live_answers(question_timestamp=None):
     import sqlite3
     if not os.path.exists(ANSWERS_DB):
         return pd.DataFrame()
     try:
         with sqlite3.connect(ANSWERS_DB) as conn:
-            # If specific question is requested, query for it directly
-            if question_text:
-                # Use parameter substitution for safety
-                query = "SELECT timestamp, question, answer FROM answers WHERE question = ? ORDER BY timestamp DESC LIMIT 1"
-                return pd.read_sql_query(query, conn, params=(question_text,))
+            # If specific question timestamp is provided, query for it directly
+            if question_timestamp:
+                query = "SELECT timestamp, question, answer FROM answers WHERE timestamp = ? LIMIT 1"
+                return pd.read_sql_query(query, conn, params=(question_timestamp,))
             else:
                 # Fallback to latest global answer
                 return pd.read_sql_query("SELECT timestamp, question, answer FROM answers ORDER BY timestamp DESC LIMIT 1", conn)
@@ -156,7 +155,7 @@ def render_stock_ticker():
     df = load_csv_data(NEWS_FILE)
     if not df.empty and 'source' in df.columns:
         # Filter for Alpha Vantage data
-        stock_df = df[df['source'] == 'Alpha Vantage'].copy()
+        stock_df = df[df['source'] == 'Yahoo finance'].copy()
         
         if not stock_df.empty:
             # Sort by timestamp descending
@@ -233,8 +232,9 @@ if prompt := st.chat_input("Ask about the market..."):
         message_placeholder.markdown("Analyzing market data...")
         
         # 1. Write prompt to CSV for Backend
+        timestamp_str = datetime.datetime.now().isoformat()
         new_q = pd.DataFrame([{
-            "timestamp": datetime.datetime.now().isoformat(),
+            "timestamp": timestamp_str,
             "query_text": prompt,
             "user": "WebUser"
         }])
@@ -258,23 +258,21 @@ if prompt := st.chat_input("Ask about the market..."):
         
         while (datetime.datetime.now() - start_time).seconds < time_to_wait:
             time.sleep(1)
-            # Query specifically for OUR question
-            answers_df = load_live_answers(question_text=prompt)
+            # Query specifically for OUR question timestamp
+            answers_df = load_live_answers(question_timestamp=timestamp_str)
             if not answers_df.empty:
                 latest_row = answers_df.iloc[0]
-                # Double check (redundant but safe)
-                db_question = latest_row.get('question', '')
-                if db_question == prompt:
-                     # It's a match!
-                     final_answer = latest_row['answer']
-                     message_placeholder.markdown(final_answer)
-                     # Add to history
-                     st.session_state.messages.append({"role": "assistant", "content": final_answer})
-                     found_answer = True
-                     break
+                # It's a match by ID/timestamp!
+                final_answer = latest_row['answer']
+                message_placeholder.markdown(final_answer)
+                # Add to history
+                st.session_state.messages.append({"role": "assistant", "content": final_answer})
+                found_answer = True
+                break
         
         if not found_answer:
-            timeout_msg = "⏱️ Analysis timed out. The backend might be busy."
-            message_placeholder.markdown(timeout_msg)
-            st.session_state.messages.append({"role": "assistant", "content": timeout_msg})
+             # Timeout
+             error_msg = "⏱️ Analysis timed out. The backend might be busy."
+             message_placeholder.error(error_msg)
+             st.session_state.messages.append({"role": "assistant", "content": error_msg})
 
